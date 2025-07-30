@@ -8,6 +8,8 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
 
 # Serial settings
 PORT = '/dev/ttyUSB0'
@@ -25,6 +27,24 @@ ekf_roll_data = []
 ekf_pitch_data = []
 ekf_yaw_data = []
 max_points = 100
+
+def rotation_matrix(roll, pitch, yaw):
+    """Generate rotation matrix from roll, pitch, yaw in degrees"""
+    r = np.radians(roll)
+    p = np.radians(pitch)
+    y = np.radians(yaw)
+
+    Rx = np.array([[1, 0, 0],
+                   [0, np.cos(r), -np.sin(r)],
+                   [0, np.sin(r), np.cos(r)]])
+    Ry = np.array([[np.cos(p), 0, np.sin(p)],
+                   [0, 1, 0],
+                   [-np.sin(p), 0, np.cos(p)]])
+    Rz = np.array([[np.cos(y), -np.sin(y), 0],
+                   [np.sin(y), np.cos(y), 0],
+                   [0, 0, 1]])
+
+    return Rz @ Ry @ Rx
 
 
 class OrientationVisualizer:
@@ -50,12 +70,20 @@ class OrientationVisualizer:
         self.terminal = ScrolledText(self.control_frame, width=40, height=20, state=tk.DISABLED, font=("Courier", 8))
         self.terminal.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # Plot setup - 2 subplots
-        self.fig, (self.ax_cf, self.ax_ekf) = plt.subplots(2, 1, figsize=(8, 8), sharex=False)
+        # Plot setup - 2D & 3D
+        self.fig = plt.figure(figsize=(12, 8))
+        self.ax_cf = self.fig.add_subplot(221)
+        self.ax_ekf = self.fig.add_subplot(222)
+        self.ax_cf_3d = self.fig.add_subplot(223, projection='3d')
+        self.ax_ekf_3d = self.fig.add_subplot(224, projection='3d')
         self.fig.tight_layout(pad=3.0)
 
-        # Setup lines once (no clearing)
+        # Setup lines
         self.setup_plots()
+
+        # Setup 3D boxes
+        self.cf_box = self.create_box(self.ax_cf_3d, "CF")
+        self.ekf_box = self.create_box(self.ax_ekf_3d, "EKF")
 
         # Canvas and animation
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
@@ -65,20 +93,57 @@ class OrientationVisualizer:
         # Request alpha value from MCU after startup
         self.root.after(2000, self.query_mcu_gains)
 
+    def create_box(self, ax, title):
+        """Initialize a 3D cube"""
+        # Cube coordinates
+        r = [-0.5, 0.5]
+        X, Y = np.meshgrid(r, r)
+        ones = np.ones_like(X)
+
+        faces = [
+            (X, Y, 0.5 * ones),
+            (X, Y, -0.5 * ones),
+            (X, 0.5 * ones, Y),
+            (X, -0.5 * ones, Y),
+            (0.5 * ones, X, Y),
+            (-0.5 * ones, X, Y)
+        ]
+
+        # Set plot limits
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
+        ax.set_zlim(-1, 1)
+        ax.set_title(title)
+        ax.view_init(30, 45)
+
+        polys = []
+        for Xf, Yf, Zf in faces:
+            polys.append(ax.plot_surface(Xf, Yf, Zf, color='cyan', alpha=0.5))
+
+        return faces
+
+    def update_box(self, ax, box_faces, roll, pitch, yaw):
+        """Update the orientation of the 3D box"""
+        R = rotation_matrix(roll, pitch, yaw)
+        ax.collections.clear()  # Clear previous surfaces
+
+        for X, Y, Z in box_faces:
+            # Flatten and rotate
+            coords = np.vstack((X.flatten(), Y.flatten(), Z.flatten()))
+            rotated = R @ coords
+            Xr = rotated[0, :].reshape(X.shape)
+            Yr = rotated[1, :].reshape(Y.shape)
+            Zr = rotated[2, :].reshape(Z.shape)
+            ax.plot_surface(Xr, Yr, Zr, color='cyan', alpha=0.5)
+
     def setup_plots(self):
         # CF lines
         self.cf_roll_line, = self.ax_cf.plot([], [], color='blue', label='Roll (°)')
         self.cf_pitch_line, = self.ax_cf.plot([], [], color='green', label='Pitch (°)')
         self.cf_yaw_line, = self.ax_cf.plot([], [], color='red', label='Yaw (°)')
-        self.cf_labels = {
-            'roll': self.ax_cf.text(0, 0, '', color='blue', fontsize=9),
-            'pitch': self.ax_cf.text(0, 0, '', color='green', fontsize=9),
-            'yaw': self.ax_cf.text(0, 0, '', color='red', fontsize=9)
-        }
-        self.ax_cf.axhline(y=0, color='gray', linestyle='--')
         self.ax_cf.set_ylim(-180, 180)
         self.ax_cf.set_ylabel("Angle (°)")
-        self.ax_cf.set_title("Complementary Filter Orientation")
+        self.ax_cf.set_title("Complementary Filter")
         self.ax_cf.grid(True)
         self.ax_cf.legend()
 
@@ -86,16 +151,9 @@ class OrientationVisualizer:
         self.ekf_roll_line, = self.ax_ekf.plot([], [], color='blue', linestyle='--', label='Roll (°)')
         self.ekf_pitch_line, = self.ax_ekf.plot([], [], color='green', linestyle='--', label='Pitch (°)')
         self.ekf_yaw_line, = self.ax_ekf.plot([], [], color='red', linestyle='--', label='Yaw (°)')
-        self.ekf_labels = {
-            'roll': self.ax_ekf.text(0, 0, '', color='blue', fontsize=9),
-            'pitch': self.ax_ekf.text(0, 0, '', color='green', fontsize=9),
-            'yaw': self.ax_ekf.text(0, 0, '', color='red', fontsize=9)
-        }
-        self.ax_ekf.axhline(y=0, color='gray', linestyle='--')
         self.ax_ekf.set_ylim(-180, 180)
         self.ax_ekf.set_ylabel("Angle (°)")
-        self.ax_ekf.set_xlabel("Time (frames)")
-        self.ax_ekf.set_title("EKF Orientation")
+        self.ax_ekf.set_title("EKF")
         self.ax_ekf.grid(True)
         self.ax_ekf.legend()
 
@@ -105,46 +163,19 @@ class OrientationVisualizer:
 
         ttk.Label(frame, text=label).pack(anchor="w")
 
-        control_frame = tk.Frame(frame)
-        control_frame.pack(anchor="w")
-
-        def decrement():
-            value = var.get() - 0.01
-            var.set(max(frm, round(value, 3)))
-            on_slide(var.get())
-            command(var.get())
-
-        btn_dec = ttk.Button(control_frame, text="−", width=2, command=decrement)
-        btn_dec.pack(side=tk.LEFT)
-
-        slider = ttk.Scale(control_frame, from_=frm, to=to, orient=tk.HORIZONTAL, length=120, variable=var)
-        slider.pack(side=tk.LEFT)
-
-        def increment():
-            value = var.get() + 0.01
-            var.set(min(to, round(value, 3)))
-            on_slide(var.get())
-            command(var.get())
-
-        btn_inc = ttk.Button(control_frame, text="+", width=2, command=increment)
-        btn_inc.pack(side=tk.LEFT)
+        slider = ttk.Scale(frame, from_=frm, to=to, orient=tk.HORIZONTAL, length=120, variable=var, command=lambda v: self.update_alpha_labels(v, command))
+        slider.pack(anchor="w")
 
         self.alpha_gyro_label = ttk.Label(frame, text=f"Gyro (α): {var.get():.3f}")
         self.alpha_gyro_label.pack(anchor="w")
-
         self.alpha_accel_label = ttk.Label(frame, text=f"Accel (1−α): {1 - var.get():.3f}")
         self.alpha_accel_label.pack(anchor="w")
 
-        def on_slide(val):
-            alpha = float(val)
-            self.alpha_gyro_label.config(text=f"Gyro (α): {alpha:.3f}")
-            self.alpha_accel_label.config(text=f"Accel (1−α): {1 - alpha:.3f}")
-
-        def on_release(event):
-            command(var.get())
-
-        slider.config(command=on_slide)
-        slider.bind("<ButtonRelease-1>", on_release)
+    def update_alpha_labels(self, val, command):
+        alpha = float(val)
+        self.alpha_gyro_label.config(text=f"Gyro (α): {alpha:.3f}")
+        self.alpha_accel_label.config(text=f"Accel (1−α): {1 - alpha:.3f}")
+        command(alpha)
 
     def set_alpha(self, val):
         out_queue.put(f"a {val:.3f}\n")
@@ -175,13 +206,10 @@ class OrientationVisualizer:
                 self.log_terminal(line)
 
                 if line.startswith("Gains"):
-                    try:
-                        _, alpha = line.split(',')
-                        self.alpha_var.set(float(alpha))
-                        self.alpha_gyro_label.config(text=f"Gyro (α): {float(alpha):.3f}")
-                        self.alpha_accel_label.config(text=f"Accel (1−α): {1 - float(alpha):.3f}")
-                    except Exception as e:
-                        self.log_terminal(f"Gain parse error: {e}")
+                    _, alpha = line.split(',')
+                    self.alpha_var.set(float(alpha))
+                    self.alpha_gyro_label.config(text=f"Gyro (α): {float(alpha):.3f}")
+                    self.alpha_accel_label.config(text=f"Accel (1−α): {1 - float(alpha):.3f}")
                     return
 
                 if line.startswith("CF,"):
@@ -199,46 +227,35 @@ class OrientationVisualizer:
                             if len(lst) > max_points:
                                 lst.pop(0)
 
+                        # Update 2D plots
                         self.update_plot_lines()
+
+                        # Update 3D boxes
+                        if cf_roll_data:
+                            self.update_box(self.ax_cf_3d, self.cf_box,
+                                            cf_roll_data[-1], cf_pitch_data[-1], cf_yaw_data[-1])
+
+                        if ekf_roll_data:
+                            self.update_box(self.ax_ekf_3d, self.ekf_box,
+                                            ekf_roll_data[-1], ekf_pitch_data[-1], ekf_yaw_data[-1])
+
                         self.canvas.draw()
             except Exception as e:
                 self.log_terminal(f"Parse error: {e}")
 
     def update_plot_lines(self):
-        # CF lines and labels
+        # CF lines
         xdata = range(len(cf_roll_data))
         self.cf_roll_line.set_data(xdata, cf_roll_data)
         self.cf_pitch_line.set_data(xdata, cf_pitch_data)
         self.cf_yaw_line.set_data(xdata, cf_yaw_data)
-
-        if cf_roll_data:
-            x = len(cf_roll_data) - 1
-            self.cf_labels['roll'].set_position((x, cf_roll_data[-1]))
-            self.cf_labels['roll'].set_text(f"R:{cf_roll_data[-1]:.1f}°")
-            self.cf_labels['pitch'].set_position((x, cf_pitch_data[-1]))
-            self.cf_labels['pitch'].set_text(f"P:{cf_pitch_data[-1]:.1f}°")
-            self.cf_labels['yaw'].set_position((x, cf_yaw_data[-1]))
-            self.cf_labels['yaw'].set_text(f"Y:{cf_yaw_data[-1]:.1f}°")
-
-        # Rescale x-axis
         self.ax_cf.set_xlim(0, max(len(cf_roll_data), 10))
 
-        # EKF lines and labels
+        # EKF lines
         xdata2 = range(len(ekf_roll_data))
         self.ekf_roll_line.set_data(xdata2, ekf_roll_data)
         self.ekf_pitch_line.set_data(xdata2, ekf_pitch_data)
         self.ekf_yaw_line.set_data(xdata2, ekf_yaw_data)
-
-        if ekf_roll_data:
-            x = len(ekf_roll_data) - 1
-            self.ekf_labels['roll'].set_position((x, ekf_roll_data[-1]))
-            self.ekf_labels['roll'].set_text(f"R:{ekf_roll_data[-1]:.1f}°")
-            self.ekf_labels['pitch'].set_position((x, ekf_pitch_data[-1]))
-            self.ekf_labels['pitch'].set_text(f"P:{ekf_pitch_data[-1]:.1f}°")
-            self.ekf_labels['yaw'].set_position((x, ekf_yaw_data[-1]))
-            self.ekf_labels['yaw'].set_text(f"Y:{ekf_yaw_data[-1]:.1f}°")
-
-        # Rescale x-axis
         self.ax_ekf.set_xlim(0, max(len(ekf_roll_data), 10))
 
 
