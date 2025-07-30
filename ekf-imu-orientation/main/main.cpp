@@ -219,7 +219,6 @@ public:
 
         x = x + K * y;
 
-        // Joseph form update for stability
         Eigen::MatrixXf I = Eigen::MatrixXf::Identity(6, 6);
         P = (I - K * H) * P * (I - K * H).transpose() + K * R * K.transpose();
 
@@ -349,6 +348,19 @@ void gain_tuning_thread() {
     }
 }
 
+void data_transmit_thread() {
+    while (true) {
+        Orientation comp = comp_filter_orientation.load();
+        Orientation ekfO = ekf_orientation.load();
+
+        printf("CF,%.2f,%.2f,%.2f,EKF,%.2f,%.2f,%.2f\n",
+               comp.roll, comp.pitch, comp.yaw,
+               ekfO.roll, ekfO.pitch, ekfO.yaw);
+
+        std::this_thread::sleep_for(250ms);
+    }
+}
+
 void imu_sensor_thread() {
     if (mpu6050_hal_init(Dev.i2cPort) == Mpu6050_Error_t::MPU6050_ERR) {
         ESP_LOGE(TAG, "Failed to initialize I2C HAL");
@@ -446,13 +458,6 @@ void imu_sensor_thread() {
 
         ekf_orientation = ekf.getOrientation();
 
-        Orientation comp = comp_filter_orientation.load();
-        Orientation ekfO = ekf_orientation.load();
-
-        printf("CF,%.2f,%.2f,%.2f,EKF,%.2f,%.2f,%.2f\n",
-               comp.roll, comp.pitch, comp.yaw,
-               ekfO.roll, ekfO.pitch, ekfO.yaw);
-
         std::this_thread::sleep_for(20ms);
     }
 }
@@ -476,4 +481,13 @@ extern "C" void app_main(void) {
     ESP_ERROR_CHECK(esp_pthread_set_cfg(&cfg_gain));
     std::thread gain_thread(gain_tuning_thread);
     gain_thread.detach();
+
+    esp_pthread_cfg_t cfg_tx = esp_pthread_get_default_config();
+    cfg_tx.stack_size = 4096;
+    cfg_tx.prio = 4;
+    cfg_tx.pin_to_core = 1;
+    cfg_tx.thread_name = "tx_thread";
+    ESP_ERROR_CHECK(esp_pthread_set_cfg(&cfg_tx));
+    std::thread tx_thread(data_transmit_thread);
+    tx_thread.detach();
 }
