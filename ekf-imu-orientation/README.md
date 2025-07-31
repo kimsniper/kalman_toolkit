@@ -118,4 +118,6 @@ python3 plot_data.py
 
 ## Video Demo
 
+![Demo](ekf-imu-orientation/images/demo.gif)
+
 Link: https://www.linkedin.com/posts/mezaeldocoy_kalmanfilter-imu-sensorfusion-activity-7356550992500281345-WmCh?utm_source=share&utm_medium=member_android&rcm=ACoAACmY-xYBsymlj36REm4IhJ-hJ5gTkK0J9l0
