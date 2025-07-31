@@ -1,4 +1,4 @@
-# Extended Kalman Filter Demo
+# Extended Kalman Filter - IMU Orientation Estimation Demo
 
 This project demonstrates how the **Kalman Filter** can be used to improve orientation estimation (roll, pitch, and yaw) using data from a 6-DoF IMU (accelerometer + gyroscope). It also compares the results with a **Complementary Filter** to show the benefits of Kalman-based sensor fusion.  
 
