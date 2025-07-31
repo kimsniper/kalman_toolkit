@@ -82,8 +82,8 @@ class OrientationVisualizer:
         self.setup_plots()
 
         # Setup 3D boxes
-        self.cf_box = self.create_box(self.ax_cf_3d, "CF")
-        self.ekf_box = self.create_box(self.ax_ekf_3d, "EKF")
+        self.cf_box = self.create_box(self.ax_cf_3d, "Complimentary Filter")
+        self.ekf_box = self.create_box(self.ax_ekf_3d, "Extended Kalman Filter")
 
         # Canvas and animation
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
@@ -94,23 +94,30 @@ class OrientationVisualizer:
         self.root.after(2000, self.query_mcu_gains)
 
     def create_box(self, ax, title):
-        """Initialize a 3D cube"""
-        # Cube coordinates
-        r = [-0.5, 0.5]
-        X, Y = np.meshgrid(r, r)
-        ones = np.ones_like(X)
+        """Initialize a 3D rectangular box"""
+        # Rectangular box coordinates
+        x_range = [-1.0, 1.0]   # Wider X-axis
+        y_range = [-0.5, 0.5]   # Same Y-axis
+        z_range = [-0.25, 0.25] # Half height on Z-axis
+
+        X, Y = np.meshgrid(x_range, y_range)
+        ones_XY = np.ones_like(X)
+        Xz, Z = np.meshgrid(x_range, z_range)
+        ones_XZ = np.ones_like(Xz)
+        Yz, Z2 = np.meshgrid(y_range, z_range)
+        ones_YZ = np.ones_like(Yz)
 
         faces = [
-            (X, Y, 0.5 * ones),
-            (X, Y, -0.5 * ones),
-            (X, 0.5 * ones, Y),
-            (X, -0.5 * ones, Y),
-            (0.5 * ones, X, Y),
-            (-0.5 * ones, X, Y)
+            (X, Y, z_range[1] * ones_XY),   # Top
+            (X, Y, z_range[0] * ones_XY),   # Bottom
+            (X, y_range[1] * ones_XY, Z2),  # Front
+            (X, y_range[0] * ones_XY, Z2),  # Back
+            (x_range[1] * ones_YZ, Yz, Z2), # Right
+            (x_range[0] * ones_YZ, Yz, Z2)  # Left
         ]
 
         # Set plot limits
-        ax.set_xlim(-1, 1)
+        ax.set_xlim(-1.5, 1.5)
         ax.set_ylim(-1, 1)
         ax.set_zlim(-1, 1)
         ax.set_title(title)
@@ -128,7 +135,6 @@ class OrientationVisualizer:
         ax.collections.clear()  # Clear previous surfaces
 
         for X, Y, Z in box_faces:
-            # Flatten and rotate
             coords = np.vstack((X.flatten(), Y.flatten(), Z.flatten()))
             rotated = R @ coords
             Xr = rotated[0, :].reshape(X.shape)
@@ -137,7 +143,7 @@ class OrientationVisualizer:
             ax.plot_surface(Xr, Yr, Zr, color='cyan', alpha=0.5)
 
     def setup_plots(self):
-        # CF lines
+        # Complimentary Filter lines
         self.cf_roll_line, = self.ax_cf.plot([], [], color='blue', label='Roll (°)')
         self.cf_pitch_line, = self.ax_cf.plot([], [], color='green', label='Pitch (°)')
         self.cf_yaw_line, = self.ax_cf.plot([], [], color='red', label='Yaw (°)')
@@ -147,13 +153,13 @@ class OrientationVisualizer:
         self.ax_cf.grid(True)
         self.ax_cf.legend()
 
-        # EKF lines
+        # Extended Kalman Filter lines
         self.ekf_roll_line, = self.ax_ekf.plot([], [], color='blue', linestyle='--', label='Roll (°)')
         self.ekf_pitch_line, = self.ax_ekf.plot([], [], color='green', linestyle='--', label='Pitch (°)')
         self.ekf_yaw_line, = self.ax_ekf.plot([], [], color='red', linestyle='--', label='Yaw (°)')
         self.ax_ekf.set_ylim(-180, 180)
         self.ax_ekf.set_ylabel("Angle (°)")
-        self.ax_ekf.set_title("EKF")
+        self.ax_ekf.set_title("Extended Kalman Filter")
         self.ax_ekf.grid(True)
         self.ax_ekf.legend()
 
@@ -244,14 +250,14 @@ class OrientationVisualizer:
                 self.log_terminal(f"Parse error: {e}")
 
     def update_plot_lines(self):
-        # CF lines
+        # Complimentary Filter lines
         xdata = range(len(cf_roll_data))
         self.cf_roll_line.set_data(xdata, cf_roll_data)
         self.cf_pitch_line.set_data(xdata, cf_pitch_data)
         self.cf_yaw_line.set_data(xdata, cf_yaw_data)
         self.ax_cf.set_xlim(0, max(len(cf_roll_data), 10))
 
-        # EKF lines
+        # Extended Kalman Filter lines
         xdata2 = range(len(ekf_roll_data))
         self.ekf_roll_line.set_data(xdata2, ekf_roll_data)
         self.ekf_pitch_line.set_data(xdata2, ekf_pitch_data)
