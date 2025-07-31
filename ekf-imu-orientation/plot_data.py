@@ -130,8 +130,7 @@ class OrientationVisualizer:
         return faces
 
     def update_box(self, ax, box_faces, roll, pitch, yaw):
-        """Update the orientation of the 3D box (swapped roll and pitch)"""
-        R = rotation_matrix(pitch, roll, yaw)
+        R = rotation_matrix(-pitch, roll, yaw)
         ax.collections.clear()  # Clear previous surfaces
 
         for X, Y, Z in box_faces:
